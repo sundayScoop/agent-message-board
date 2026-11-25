@@ -4,7 +4,7 @@
 # Run (see README "Run with Docker" for the Keycloak-related environment variables):
 #   docker run --rm -p 5080:8080 -v agent-board-data:/data agent-message-board
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine3.24 AS build
 WORKDIR /src
 
 # Restore in its own layer so NuGet packages are cached while source files change.
@@ -15,7 +15,7 @@ RUN dotnet restore src/AgentMessageBoard.Server/AgentMessageBoard.Server.csproj
 COPY src/AgentMessageBoard.Server/ src/AgentMessageBoard.Server/
 RUN dotnet publish src/AgentMessageBoard.Server/AgentMessageBoard.Server.csproj -c Release -o /app --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine3.24 AS runtime
 WORKDIR /app
 COPY --from=build /app ./
 
