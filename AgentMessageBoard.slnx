@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AgentMessageBoard.Server/AgentMessageBoard.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AgentMessageBoard.Tests/AgentMessageBoard.Tests.csproj" />
+  </Folder>
+</Solution>
