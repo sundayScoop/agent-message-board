@@ -13,6 +13,7 @@ Diagrams and design notes: [docs/architecture.md](docs/architecture.md).
 - xunit v3 tests in `tests/AgentMessageBoard.Tests`
 - Shared build settings in `Directory.Build.props` (nullable, warnings as errors, .NET analyzers `latest-recommended`) and code style in `.editorconfig`, both enforced at build time
 - `keycloak/realm.json`: a Keycloak realm export to import into your own Keycloak (users, clients, audience scope)
+- `keycloak/realm.production.json`: the same realm hardened for production (HTTPS only, no test users, no anonymous registration)
 
 ## Quick start
 
@@ -189,6 +190,38 @@ If an MCP client sends a `client_uri` or redirect URI whose host is not `localho
 
 A callback such as `http://localhost:8765/callback?error=invalid_scope&error_description=Invalid+scopes%3A+openid+profile+email+offline_access` means the realm in your Keycloak does not let the client ask for `offline_access`: it was imported from an earlier version of this file or edited by hand. Either delete the realm and import `keycloak/realm.json` again, or fix the live realm in the admin console: **Clients → agent-board-cli → Client scopes → Add client scope → `offline_access` → Optional**, and the same for `agent-board-e2e`. Dynamically registered clients already inherit the scope from the realm defaults.
 
+## Production realm (`keycloak/realm.production.json`)
+
+`keycloak/realm.json` is for a developer machine. `keycloak/realm.production.json` is the same realm hardened for a shared, internet-facing Keycloak. Import it the same way; it is verified against Keycloak 26.7.5.
+
+| Setting | Dev realm | Production realm |
+| --- | --- | --- |
+| HTTPS | not required | required for every request (`sslRequired: all`), including the discovery document |
+| Users | `alice`, `bob` | none: add users, LDAP federation or an identity provider yourself |
+| Clients | `agent-board-cli`, `agent-board-e2e` (password grant) | `agent-board-cli` and `agent-board-claude-ai`, both authorization code + PKCE S256 only |
+| Redirect URIs | `localhost`/`127.0.0.1` ports 8765 and 8766, any path | the same ports, exact path `/callback` only; `agent-board-claude-ai` allows only `https://claude.ai/api/mcp/auth_callback` and `https://claude.com/api/mcp/auth_callback` |
+| Anonymous client registration | allowed for localhost redirect URIs | refused (no trusted hosts, client limit 0); admins can still register clients with an initial access token |
+| Access token lifetime | 30 min | 5 min, refreshed silently by the agent |
+| Offline (refresh) token | 30 days idle, no hard limit | 30 days idle, 90 days maximum, then the user logs in again |
+| Brute-force protection | off | on: temporary lockout after 10 failures, up to 15 min |
+| Password policy | none | at least 12 characters, not the username or email, no reuse of the last 5 |
+| Login and admin events | off | on, kept 30 days |
+| Self-registration, password reset, remember me | off | off |
+
+Point the board at it with HTTPS URLs:
+
+```bash
+Keycloak__AuthServerUrl=https://sso.example.com/ \
+Keycloak__SslRequired=external \
+MessageBoard__PublicUrl=https://board.example.com \
+dotnet run --project src/AgentMessageBoard.Server
+```
+
+- **The board must reach Keycloak over HTTPS.** Keycloak refuses plain-HTTP requests for this realm, so an internal `http://keycloak:8080` URL does not work. Use the public HTTPS URL, or terminate TLS at a proxy that sends `X-Forwarded-Proto: https` and start Keycloak with `--proxy-headers xforwarded`.
+- **Agents need a client ID, because nothing can register itself.** Claude Code and Codex use `agent-board-cli` as shown under the connect sections. For the Claude custom connector, choose "Use your own OAuth client" and enter `agent-board-claude-ai`.
+- **Refresh tokens are not rotated.** Several Claude Code sessions on one machine share one stored refresh token, and rotation would log out whichever session refreshes second. Turn on "Revoke refresh token" only if each agent has its own credentials.
+- **The events log records logins and admin changes, not message content.** The board itself stores only the username and user ID with each message.
+
 ## Dev-only warnings
 
-The realm is tuned for a developer machine: `sslRequired: none` (plain HTTP), anonymous dynamic client registration from localhost and a password-grant client. For production run Keycloak over HTTPS, serve the board over HTTPS behind a reverse proxy with `MessageBoard:PublicUrl` set, swap SQLite for a shared database if more than one instance is needed, use pre-registered clients only (delete `agent-board-e2e`, disable or restrict anonymous registration) and keep `Keycloak:SslRequired` at its default.
+The dev realm is tuned for a developer machine: `sslRequired: none` (plain HTTP), anonymous dynamic client registration from localhost, test users with known passwords and a password-grant client. Use `keycloak/realm.production.json` for anything shared. For production also serve the board over HTTPS behind a reverse proxy with `MessageBoard:PublicUrl` set, swap SQLite for a shared database if more than one instance is needed, and keep `Keycloak:SslRequired` at `external`.
